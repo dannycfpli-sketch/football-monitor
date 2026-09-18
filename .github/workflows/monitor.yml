@@ -1,0 +1,36 @@
+name: football-0-0-monitor
+
+on:
+  schedule:
+    # 每 5 分钟跑一次（UTC 时间）
+    - cron: '*/5 * * * *'
+  workflow_dispatch:  # 允许手动触发测试
+
+permissions:
+  contents: write  # 允许 commit pushed.json 回仓库
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 运行监控脚本
+        env:
+          RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
+          WXPUSHER_SPT: ${{ secrets.WXPUSHER_SPT }}
+        run: node monitor.js
+
+      - name: 保存去重状态
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pushed.json 2>/dev/null || true
+          git diff --cached --quiet || git commit -m "chore: update pushed state [skip ci]"
+          git push
