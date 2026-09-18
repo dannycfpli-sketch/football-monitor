@@ -4,18 +4,18 @@
  *  1. 拉取全球进行中的比赛（RapidAPI Free API Live Football Data）
  *  2. 筛选「比分 0:0 且比赛进行到 50 分钟以上」的比赛
  *  3. 去重（已推送过的比赛不再推）
- *  4. 通过 WxPusher 推到微信
+ *  4. 通过 Server酱 推到微信（微信服务号通知）
  *
  * 环境变量（在 GitHub 仓库 Settings → Secrets 里配置）：
  *   RAPIDAPI_KEY  = RapidAPI 的 X-RapidAPI-Key
- *   WXPUSHER_SPT  = WxPusher 扫码得到的 SPT
+ *   SCT_SENDKEY   = Server酱 的 SendKey（SCT 开头）
  */
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
 const KEY = process.env.RAPIDAPI_KEY;
-const SPT = process.env.WXPUSHER_SPT;
+const SENDKEY = process.env.SCT_SENDKEY;
 const MIN_MINUTE = 50; // 比赛进行到多少分钟还没进球才提醒
 const PUSHED_FILE = path.join(__dirname, 'pushed.json');
 
@@ -52,11 +52,30 @@ function getMinute(m) {
   return mm ? parseInt(mm[0], 10) : null;
 }
 
-// 通过 WxPusher SPT 极简推送到微信
-async function pushWxPusher(text) {
-  const url = `https://wxpusher.zjiecode.com/api/send/message/${SPT}/${encodeURIComponent(text)}`;
-  const r = await request(url, {});
-  return r;
+// 通过 Server酱 推送到微信（微信服务号通知）
+function pushServerChan(title, desp) {
+  return new Promise((resolve, reject) => {
+    const url = `https://sc.ftqq.com/${SENDKEY}.send`;
+    const body = `title=${encodeURIComponent(title)}&desp=${encodeURIComponent(desp)}`;
+    const req = https.request(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(body),
+        'User-Agent': 'football-monitor/1.0',
+      },
+    }, (res) => {
+      let d = '';
+      res.on('data', (c) => (d += c));
+      res.on('end', () => {
+        try { resolve(JSON.parse(d)); } catch (e) { resolve(d); }
+      });
+    });
+    req.on('error', reject);
+    req.setTimeout(15000, () => req.destroy(new Error('timeout')));
+    req.write(body);
+    req.end();
+  });
 }
 
 function loadPushed() {
@@ -67,8 +86,8 @@ function loadPushed() {
 }
 
 async function main() {
-  if (!KEY || !SPT) {
-    console.error('缺少环境变量 RAPIDAPI_KEY 或 WXPUSHER_SPT');
+  if (!KEY || !SENDKEY) {
+    console.error('缺少环境变量 RAPIDAPI_KEY 或 SCT_SENDKEY');
     process.exit(1);
   }
 
@@ -96,11 +115,17 @@ async function main() {
     const mn = getMinute(m);
     const home = (m.home && m.home.name) || '?';
     const away = (m.away && m.away.name) || '?';
-    const text = `⚽ 0:0 已到 ${mn} 分钟\n${home} 0-0 ${away}\n比赛进行到 ${mn} 分钟仍未进球`;
+    const title = `⚽ 0:0 已到 ${mn} 分钟：${home} vs ${away}`;
+    const desp = `${home} **0-0** ${away}\n\n比赛已进行到 **${mn} 分钟**，比分仍为 0:0。`;
     try {
-      await pushWxPusher(text);
-      pushed[m.id] = Date.now();
-      console.log(`✅ 已推送: ${home} vs ${away} (${mn}分钟)`);
+      const r = await pushServerChan(title, desp);
+      // Server酱 code=0 表示成功
+      if (r && r.code === 0) {
+        pushed[m.id] = Date.now();
+        console.log(`✅ 已推送: ${home} vs ${away} (${mn}分钟)`);
+      } else {
+        console.error(`推送异常 ${home} vs ${away}:`, JSON.stringify(r));
+      }
     } catch (e) {
       console.error(`推送失败 ${home} vs ${away}:`, e.message);
     }
