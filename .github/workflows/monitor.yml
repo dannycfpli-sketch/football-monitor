@@ -24,7 +24,7 @@ jobs:
       - name: 运行监控脚本
         env:
           RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
-          WXPUSHER_SPT: ${{ secrets.WXPUSHER_SPT }}
+          SCT_SENDKEY: ${{ secrets.SCT_SENDKEY }}
         run: node monitor.js
 
       - name: 保存去重状态
